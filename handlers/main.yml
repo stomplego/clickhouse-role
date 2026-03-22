@@ -1,0 +1,13 @@
+---
+- name: start clickhouse
+  systemd:
+    name: clickhouse-server
+    state: started
+    enabled: yes
+  become: yes
+
+- name: restart clickhouse
+  systemd:
+    name: clickhouse-server
+    state: restarted
+  become: yes

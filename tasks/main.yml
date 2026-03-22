@@ -1,0 +1,43 @@
+---
+- name: Install required packages
+  apt:
+    name:
+      - apt-transport-https
+      - ca-certificates
+      - dirmngr
+      - gnupg
+    state: present
+    update_cache: yes
+  become: yes
+
+- name: Add ClickHouse GPG key
+  apt_key:
+    url: https://keyserver.ubuntu.com/pks/lookup?op=get&search=0xE0C56BD4D56F6E2A
+    state: present
+  become: yes
+
+- name: Add ClickHouse repository
+  apt_repository:
+    repo: "deb https://packages.clickhouse.com/deb stable main"
+    state: present
+    update_cache: yes
+  become: yes
+
+- name: Install ClickHouse packages
+  apt:
+    name:
+      - clickhouse-client
+      - clickhouse-server
+      - clickhouse-common-static
+    state: present
+  become: yes
+  notify: start clickhouse
+
+- name: Create ClickHouse data directory
+  file:
+    path: /var/lib/clickhouse
+    state: directory
+    owner: clickhouse
+    group: clickhouse
+    mode: '0755'
+  become: yes
