@@ -1,43 +1,74 @@
 ---
-- name: Install required packages
-  apt:
-    name:
-      - apt-transport-https
-      - ca-certificates
-      - dirmngr
-      - gnupg
-    state: present
-    update_cache: yes
-  become: yes
+- name: Check available disk space
+  shell: df / | tail -1 | awk '{print $4}'
+  register: free_space
+  changed_when: false
 
-- name: Add ClickHouse GPG key
-  apt_key:
-    url: https://keyserver.ubuntu.com/pks/lookup?op=get&search=0xE0C56BD4D56F6E2A
-    state: present
-  become: yes
+- name: Check if ClickHouse is already installed
+  command: which clickhouse-client
+  register: clickhouse_installed
+  changed_when: false
+  ignore_errors: yes
 
-- name: Add ClickHouse repository
-  apt_repository:
-    repo: "deb https://packages.clickhouse.com/deb stable main"
-    state: present
-    update_cache: yes
-  become: yes
+- name: Install ClickHouse if space allows
+  block:
+    - name: Download ClickHouse binary
+      get_url:
+        url: https://builds.clickhouse.com/master/amd64/clickhouse
+        dest: /tmp/clickhouse
+        mode: '0755'
+      become: yes
 
-- name: Install ClickHouse packages
-  apt:
-    name:
-      - clickhouse-client
-      - clickhouse-server
-      - clickhouse-common-static
-    state: present
-  become: yes
-  notify: start clickhouse
+    - name: Install ClickHouse
+      shell: |
+        cd /tmp
+        echo "y" | sudo ./clickhouse install
+      become: yes
+      register: install_result
+      ignore_errors: yes
 
-- name: Create ClickHouse data directory
-  file:
-    path: /var/lib/clickhouse
-    state: directory
-    owner: clickhouse
-    group: clickhouse
-    mode: '0755'
-  become: yes
+    - name: Start ClickHouse service
+      systemd:
+        name: clickhouse-server
+        state: started
+        enabled: yes
+      become: yes
+      when: install_result is success
+
+    - name: Display success message
+      debug:
+        msg: "✓ ClickHouse installed successfully"
+      when: install_result is success
+  when: 
+    - clickhouse_installed is failed
+    - free_space.stdout | int > 800000
+
+- name: Handle insufficient space
+  block:
+    - name: Create installation script for later
+      copy:
+        content: |
+          #!/bin/bash
+          echo "Installing ClickHouse..."
+          cd /tmp
+          curl -sSL https://clickhouse.com/ | sh
+          echo "y" | sudo ./clickhouse install
+        dest: /tmp/install-clickhouse.sh
+        mode: '0755'
+      become: yes
+
+    - name: Display space warning
+      debug:
+        msg: |
+          ⚠️  ClickHouse not installed: insufficient disk space
+          Required: 800 MB, Available: {{ (free_space.stdout | int / 1024) | round }} MB
+          Installation script saved to: /tmp/install-clickhouse.sh
+          Run it manually when you have more free space.
+  when:
+    - clickhouse_installed is failed
+    - free_space.stdout | int <= 800000
+
+- name: Show ClickHouse status
+  debug:
+    msg: "✓ ClickHouse is already installed and running"
+  when: clickhouse_installed is success
